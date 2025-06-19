@@ -101,8 +101,7 @@ Questo progetto è concesso in licenza con la licenza MIT - vedi il file [LICENS
 
 ## 🙏 Ringraziamenti
 
-- [MowerArduino](https://github.com/evlas/MowerArduino) - Il progetto principale a cui questo modulo si collega
-- Tutti i contributori che hanno aiutato a migliorare questo progetto
+- Mamma che mi ha fatto così
 
 ---
 
