@@ -16,6 +16,8 @@
 #include <Ticker.h>
 #include <SoftwareSerial.h>  // Aggiunta della libreria SoftwareSerial
 
+//#define LED_BUILTIN D4 // LED integrato su D1 Mini
+
 // Dichiarazioni delle funzioni
 void connectToWiFi();
 void setupWebServer();
@@ -25,6 +27,10 @@ void handleGetStatus();
 void handleStart();
 void handleStop();
 void handleDock();
+void handleForward();
+void handleBackward();
+void handleLeft();
+void handleRight();
 void readFromMower();
 void sendCommandToMower(const String& command);
 
@@ -37,15 +43,15 @@ void publishMqttState();
 void mqttPublish(const char* topic, const char* payload, bool retain = false);
 
 // Configurazione WiFi
-const char* ssid = "NOME_RETE_WIFI";
-const char* password = "PASSWORD_WIFI";
+const char* ssid = "IoT";
+const char* password = "zYrfvyFosg";
 const char* host = "mowerbridge";  // Nome host mDNS
 
 // Configurazione MQTT
-const char* mqtt_server = "homeassistant.local";  // O l'IP del tuo server MQTT
+const char* mqtt_server = "192.168.100.20";  // O l'IP del tuo server MQTT
 const int mqtt_port = 1883;
-const char* mqtt_user = "mqtt_user";      // Sostituisci con le tue credenziali
-const char* mqtt_password = "mqtt_pass";
+const char* mqtt_user = "NodeRed";      // Sostituisci con le tue credenziali
+const char* mqtt_password = "NodeRed";
 const char* mqtt_client_id = "d1mini_mower";
 const char* mqtt_base_topic = "home/mower";
 
@@ -83,6 +89,8 @@ struct MowerStatus {
 } mowerStatus;
 
 void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH); // LED spento all'avvio
   // Inizializza la seriale per il debug
   Serial.begin(115200);
   
@@ -174,6 +182,7 @@ void handleRoot() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mower Control Panel</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <style>
@@ -184,6 +193,16 @@ void handleRoot() {
         .map-container { height: 400px; border-radius: 0.25rem; overflow: hidden; }
         #map { height: 100%; width: 100%; }
         .btn-action { min-width: 100px; margin: 0 5px; }
+.btn-direction {
+    width: 56px;
+    height: 56px;
+    font-size: 1.5rem;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
     </style>
 </head>
 <body>
@@ -192,7 +211,7 @@ void handleRoot() {
         
         <div class="row">
             <!-- Stato -->
-            <div class="col-md-6">
+            <div class="col-12">
                 <div class="card status-card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="card-title mb-0">Stato del Tagliaerba</h5>
@@ -234,12 +253,23 @@ void handleRoot() {
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Pulsanti di Controllo -->
-        <div class="text-center mb-4">
-            <button id="btnStart" class="btn btn-success btn-action">Avvia</button>
-            <button id="btnStop" class="btn btn-danger btn-action">Ferma</button>
-            <button id="btnDock" class="btn btn-warning btn-action">Richiama</button>
+    <!-- Mappa -->
+    <div class="container">
+        <div class="map-container mb-4 position-relative">
+            <!-- Pulsanti Direzionali sovrapposti -->
+            <div id="direction-controls" style="position:absolute; top:12px; right:12px; z-index:1000;">
+                <div class="d-flex flex-column align-items-center">
+                    <button id="btnForward" class="btn btn-primary btn-direction mb-1"><i class="bi bi-arrow-up"></i></button>
+                    <div class="d-flex">
+                        <button id="btnLeft" class="btn btn-primary btn-direction me-1"><i class="bi bi-arrow-left"></i></button>
+                        <button id="btnRight" class="btn btn-primary btn-direction ms-1"><i class="bi bi-arrow-right"></i></button>
+                    </div>
+                    <button id="btnBackward" class="btn btn-primary btn-direction mt-1"><i class="bi bi-arrow-down"></i></button>
+                </div>
+            </div>
+            <div id="map"></div>
         </div>
     </div>
 
@@ -271,11 +301,11 @@ void handleRoot() {
                 // Aggiorna ultimo aggiornamento
                 var now = new Date();
                 document.getElementById('lastUpdate').textContent = 'Ultimo aggiornamento: ' + now.toLocaleTimeString();
-                
-                // Nessun grafico da aggiornare
-                    marker.setLatLng([lat, lng]);
-                    map.panTo([lat, lng]);
-                }
+                // Per ora non aggiorniamo marker/lat/lng (manca dato reale)
+                // if (typeof marker !== 'undefined' && typeof map !== 'undefined' && typeof lat !== 'undefined' && typeof lng !== 'undefined') {
+                //     marker.setLatLng([lat, lng]);
+                //     map.panTo([lat, lng]);
+                // }
             })
             .catch(function(error) {
                 console.error('Errore durante l\'aggiornamento dei dati:', error);
@@ -286,8 +316,22 @@ void handleRoot() {
     document.getElementById('btnStart').addEventListener('click', function() { fetch('/api/start'); });
     document.getElementById('btnStop').addEventListener('click', function() { fetch('/api/stop'); });
     document.getElementById('btnDock').addEventListener('click', function() { fetch('/api/dock'); });
+    // Pulsanti direzionali
+    document.getElementById('btnForward').addEventListener('click', function() { fetch('/api/forward'); });
+    document.getElementById('btnBackward').addEventListener('click', function() { fetch('/api/backward'); });
+    document.getElementById('btnLeft').addEventListener('click', function() { fetch('/api/left'); });
+    document.getElementById('btnRight').addEventListener('click', function() { fetch('/api/right'); });
 
     // Inizializzazione
+    var map, marker;
+    function initMap() {
+        map = L.map('map').setView([41.9028, 12.4964], 13); // Roma
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        marker = L.marker([41.9028, 12.4964]).addTo(map)
+            .bindPopup('Posizione fittizia').openPopup();
+    }
     document.addEventListener('DOMContentLoaded', function() {
         initMap();
         updateData();
@@ -324,6 +368,10 @@ void setupWebServer() {
   server.on("/api/start", HTTP_GET, handleStart);
   server.on("/api/stop", HTTP_GET, handleStop);
   server.on("/api/dock", HTTP_GET, handleDock);
+  server.on("/api/forward", HTTP_GET, handleForward);
+  server.on("/api/backward", HTTP_GET, handleBackward);
+  server.on("/api/left", HTTP_GET, handleLeft);
+  server.on("/api/right", HTTP_GET, handleRight);
 
   server.begin();
   Serial.println("Server HTTP avviato");
@@ -386,8 +434,47 @@ void handleDock() {
     Serial.println("Richiesto ritorno alla base");
 }
 
+// Handler per i comandi di direzione
+void handleForward() {
+    sendCommandToMower("FORWARD");
+    mowerStatus.currentState = "Avanti";
+    mowerStatus.lastUpdate = millis();
+    String json = "{\"status\":\"ok\",\"message\":\"Avanti richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
+    server.send(200, "application/json", json);
+    Serial.println("Richiesto movimento avanti");
+}
+
+void handleBackward() {
+    sendCommandToMower("BACKWARD");
+    mowerStatus.currentState = "Indietro";
+    mowerStatus.lastUpdate = millis();
+    String json = "{\"status\":\"ok\",\"message\":\"Indietro richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
+    server.send(200, "application/json", json);
+    Serial.println("Richiesto movimento indietro");
+}
+
+void handleLeft() {
+    sendCommandToMower("LEFT");
+    mowerStatus.currentState = "Sinistra";
+    mowerStatus.lastUpdate = millis();
+    String json = "{\"status\":\"ok\",\"message\":\"Sinistra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
+    server.send(200, "application/json", json);
+    Serial.println("Richiesto movimento sinistra");
+}
+
+void handleRight() {
+    sendCommandToMower("RIGHT");
+    mowerStatus.currentState = "Destra";
+    mowerStatus.lastUpdate = millis();
+    String json = "{\"status\":\"ok\",\"message\":\"Destra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
+    server.send(200, "application/json", json);
+    Serial.println("Richiesto movimento destra");
+}
+
 // Invia un comando al tagliaerba
 void sendCommandToMower(const String& command) {
+  digitalWrite(LED_BUILTIN, LOW);   // LED acceso (TX)
+  delay(10); // breve lampeggio visibile
   jsonDoc.clear();
   jsonDoc["cmd"] = command;
   jsonDoc["timestamp"] = millis();
@@ -395,6 +482,7 @@ void sendCommandToMower(const String& command) {
   String jsonString;
   serializeJson(jsonDoc, jsonString);
   mowerSerial.println(jsonString);
+  digitalWrite(LED_BUILTIN, HIGH);  // LED spento
   Serial.println("Comando inviato: " + command);
   
   // Pubblica il comando su MQTT
@@ -543,44 +631,45 @@ void mqttPublish(const char* topic, const char* payload, bool retain) {
 
 // Legge i dati dal tagliaerba
 void readFromMower() {
-  if (mowerSerial.available()) {
-    String input = mowerSerial.readStringUntil('\n');
-    input.trim();
-    
-    if (input.length() > 0) {
+  while (mowerSerial.available()) {
+    digitalWrite(LED_BUILTIN, LOW);   // LED acceso (RX)
+    String line = mowerSerial.readStringUntil('\n');
+    delay(10); // breve lampeggio visibile
+    digitalWrite(LED_BUILTIN, HIGH);  // LED spento
+    if (line.length() > 0) {  
       Serial.print("Ricevuto: ");
-      Serial.println(input);
+      Serial.println(line);
       
       // Esempio: STATUS:RUNNING,BATT:24.5,PERCENT:75
-      if (input.startsWith("STATUS:")) {
-        if (input.indexOf("RUNNING") != -1) {
+      if (line.startsWith("STATUS:")) {
+        if (line.indexOf("RUNNING") != -1) {
           mowerStatus.isRunning = true;
           mowerStatus.currentState = "In funzione";
-        } else if (input.indexOf("STOPPED") != -1) {
+        } else if (line.indexOf("STOPPED") != -1) {
           mowerStatus.isRunning = false;
           mowerStatus.currentState = "Fermo";
-        } else if (input.indexOf("CHARGING") != -1) {
+        } else if (line.indexOf("CHARGING") != -1) {
           mowerStatus.isCharging = true;
           mowerStatus.currentState = "In carica";
         }
       }
       
       // Estrai il livello della batteria
-      int battIndex = input.indexOf("BATT:");
+      int battIndex = line.indexOf("BATT:");
       if (battIndex != -1) {
-        int commaIndex = input.indexOf(',', battIndex);
-        if (commaIndex == -1) commaIndex = input.length();
-        String battStr = input.substring(battIndex + 5, commaIndex);
+        int commaIndex = line.indexOf(',', battIndex);
+        if (commaIndex == -1) commaIndex = line.length();
+        String battStr = line.substring(battIndex + 5, commaIndex);
         mowerStatus.batteryVoltage = battStr.toFloat();
       }
       
       // Estrai la percentuale della batteria
-      int percentIndex = input.indexOf("PERCENT:");
+      int percentIndex = line.indexOf("PERCENT:");
       if (percentIndex != -1) {
-        int commaIndex = input.indexOf(',', percentIndex);
-        if (commaIndex == -1) commaIndex = input.length();
-        String percentStr = input.substring(percentIndex + 8, commaIndex);
-        mowerStatus.batteryPercentage = percentStr.toInt();
+        int commaIndex = line.indexOf(',', percentIndex);
+        if (commaIndex == -1) commaIndex = line.length();
+        String percentStr = line.substring(percentIndex + 8, commaIndex);
+        mowerStatus.batteryPercentage = percentStr.toFloat();
       }
       
       mowerStatus.lastUpdate = millis();
