@@ -16,7 +16,7 @@
 #include <Ticker.h>
 #include <SoftwareSerial.h>
 
-#define DEBUG  // Commenta questa linea per disabilitare il debug seriale
+//#define DEBUG  // Commenta questa linea per disabilitare il debug seriale
 
 #ifdef DEBUG
   #define DBG_BEGIN(baud) Serial.begin(baud)
@@ -27,6 +27,7 @@
   #define DBG_BEGIN(baud)
   #define DBG_PRINT(x)
   #define DBG_PRINTLN(x)
+  #define DBG_FUNC_ENTER()
 #endif
 
 #ifdef DEBUG
