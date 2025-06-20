@@ -33,6 +33,8 @@ void handleLeft();
 void handleRight();
 void readFromMower();
 void sendCommandToMower(const String& command);
+void handleEnableTelemetry();
+void handleDisableTelemetry();
 
 // Funzioni MQTT
 void setupMqtt();
@@ -101,6 +103,22 @@ String translateCommand(const String& legacyCmd) {
   if (cmd == "RIGHT") return "turnRight";
   // default: pass through unchanged
   return legacyCmd;
+}
+
+// ====== MAPPATURA CODICE STATO -> TESTO ======
+String mowerStateToString(int stateCode) {
+  switch (stateCode) {
+    case 0: return "Idle";
+    case 1: return "Manual";
+    case 2: return "Mowing";
+    case 3: return "ReturnToBase";
+    case 4: return "Charging";
+    case 5: return "Error";
+    case 6: return "Emergency";
+    case 7: return "Border";
+    case 8: return "Obstacle";
+    default: return "Unknown";
+  }
 }
 
 void setup() {
@@ -387,6 +405,8 @@ void setupWebServer() {
   server.on("/api/backward", HTTP_GET, handleBackward);
   server.on("/api/left", HTTP_GET, handleLeft);
   server.on("/api/right", HTTP_GET, handleRight);
+  server.on("/api/enableTelemetry", HTTP_GET, handleEnableTelemetry);
+  server.on("/api/disableTelemetry", HTTP_GET, handleDisableTelemetry);
 
   server.begin();
   Serial.println("Server HTTP avviato");
@@ -410,6 +430,8 @@ void handleGetStatus() {
   json += "}";
   
   server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", json);
 }
 
 void handleStart() {
@@ -484,6 +506,35 @@ void handleRight() {
     String json = "{\"status\":\"ok\",\"message\":\"Destra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
     Serial.println("Richiesto movimento destra");
+}
+
+void handleEnableTelemetry() {
+  String intervalStr = server.arg("interval");
+  uint32_t interval = intervalStr.length() ? intervalStr.toInt() : 1000;
+
+  jsonDoc.clear();
+  jsonDoc["cmd"] = "enableTelemetry";
+  JsonObject params = jsonDoc.createNestedObject("params");
+  params["interval"] = interval;
+  jsonDoc["timestamp"] = millis();
+
+  String jsonStr;
+  serializeJson(jsonDoc, jsonStr);
+  mowerSerial.println(jsonStr);
+
+  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry enabled\"}");
+}
+
+void handleDisableTelemetry() {
+  jsonDoc.clear();
+  jsonDoc["cmd"] = "disableTelemetry";
+  jsonDoc["timestamp"] = millis();
+
+  String jsonStr;
+  serializeJson(jsonDoc, jsonStr);
+  mowerSerial.println(jsonStr);
+
+  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry disabled\"}");
 }
 
 // Invia un comando al tagliaerba
@@ -651,48 +702,75 @@ void readFromMower() {
     String line = mowerSerial.readStringUntil('\n');
     delay(10); // breve lampeggio visibile
     digitalWrite(LED_BUILTIN, HIGH);  // LED spento
-    if (line.length() > 0) {  
-      Serial.print("Ricevuto: ");
-      Serial.println(line);
-      
-      // Esempio: STATUS:RUNNING,BATT:24.5,PERCENT:75
-      if (line.startsWith("STATUS:")) {
-        if (line.indexOf("RUNNING") != -1) {
-          mowerStatus.isRunning = true;
-          mowerStatus.currentState = "In funzione";
-        } else if (line.indexOf("STOPPED") != -1) {
-          mowerStatus.isRunning = false;
-          mowerStatus.currentState = "Fermo";
-        } else if (line.indexOf("CHARGING") != -1) {
-          mowerStatus.isCharging = true;
-          mowerStatus.currentState = "In carica";
+    if (line.length() == 0) continue;
+
+    line.trim();
+
+    // --- Nuovo formato JSON dal progetto MowerArduino ---
+    if (line.startsWith("{")) {
+      StaticJsonDocument<512> doc;
+      DeserializationError err = deserializeJson(doc, line);
+      if (!err) {
+        // isMowing / isCharging
+        mowerStatus.isRunning   = doc["isMowing"].as<bool>();
+        mowerStatus.isCharging  = doc["isCharging"].as<bool>();
+
+        // battery
+        if (doc["battery"].is<JsonObject>()) {
+          JsonObject batt = doc["battery"].as<JsonObject>();
+          mowerStatus.batteryVoltage    = batt["voltage"].as<float>();
+          mowerStatus.batteryPercentage = batt["level"].as<float>();
         }
+
+        // textual state from numeric code if present
+        if (doc.containsKey("state")) {
+          mowerStatus.currentState = mowerStateToString(doc["state"].as<int>());
+        }
+
+        mowerStatus.lastUpdate = millis();
+
+        // Pubblica su MQTT
+        if (mqttClient.connected()) {
+          publishMqttState();
+        }
+        continue; // già gestito
       }
-      
-      // Estrai il livello della batteria
-      int battIndex = line.indexOf("BATT:");
-      if (battIndex != -1) {
-        int commaIndex = line.indexOf(',', battIndex);
-        if (commaIndex == -1) commaIndex = line.length();
-        String battStr = line.substring(battIndex + 5, commaIndex);
-        mowerStatus.batteryVoltage = battStr.toFloat();
+    }
+
+    // --- Formato legacy: STATUS:RUNNING,BATT:24.5,PERCENT:75 ---
+    if (line.startsWith("STATUS:")) {
+      if (line.indexOf("RUNNING") != -1) {
+        mowerStatus.isRunning = true;
+        mowerStatus.currentState = "In funzione";
+      } else if (line.indexOf("STOPPED") != -1) {
+        mowerStatus.isRunning = false;
+        mowerStatus.currentState = "Fermo";
+      } else if (line.indexOf("CHARGING") != -1) {
+        mowerStatus.isCharging = true;
+        mowerStatus.currentState = "In carica";
       }
-      
-      // Estrai la percentuale della batteria
-      int percentIndex = line.indexOf("PERCENT:");
-      if (percentIndex != -1) {
-        int commaIndex = line.indexOf(',', percentIndex);
-        if (commaIndex == -1) commaIndex = line.length();
-        String percentStr = line.substring(percentIndex + 8, commaIndex);
-        mowerStatus.batteryPercentage = percentStr.toFloat();
-      }
-      
-      mowerStatus.lastUpdate = millis();
-      
-      // Pubblica l'aggiornamento su MQTT
-      if (mqttClient.connected()) {
-        publishMqttState();
-      }
+    }
+
+    int battIndex = line.indexOf("BATT:");
+    if (battIndex != -1) {
+      int commaIndex = line.indexOf(',', battIndex);
+      if (commaIndex == -1) commaIndex = line.length();
+      String battStr = line.substring(battIndex + 5, commaIndex);
+      mowerStatus.batteryVoltage = battStr.toFloat();
+    }
+
+    int percentIndex = line.indexOf("PERCENT:");
+    if (percentIndex != -1) {
+      int commaIndex = line.indexOf(',', percentIndex);
+      if (commaIndex == -1) commaIndex = line.length();
+      String percentStr = line.substring(percentIndex + 8, commaIndex);
+      mowerStatus.batteryPercentage = percentStr.toFloat();
+    }
+
+    mowerStatus.lastUpdate = millis();
+
+    if (mqttClient.connected()) {
+      publishMqttState();
     }
   }
 }

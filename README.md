@@ -35,7 +35,6 @@ D1MiniSerial è un bridge WiFi basato su ESP8266 (D1 Mini) che permette il contr
 | 3.3V   | Alimentazione         | Se necessario                 |
 | GND    | GND                   | Terra comune                 |
 
-
 ## 🚀 Installazione
 
 1. **Clona il repository**
@@ -73,7 +72,9 @@ L'interfaccia web include:
 - **Mappa** per la posizione del tagliaerba
 - **Aggiornamento in tempo reale** dei dati
 
-![Screenshot dell'interfaccia web](mock.html) (Apri mock.html nel browser per vedere un'anteprima)
+## 📸 Mock-up interfaccia
+![Anteprima pagina web](assets/mock.png)
+> L’immagine `assets/mock.png` è un semplice mock-up o screenshot dell’interfaccia web. Inserisci il file (ad esempio uno screenshot reale o un mock-up creato con Figma/Draw.io) nella cartella `assets/` per visualizzarlo su GitHub.
 
 ## 🔌 Integrazione con Home Assistant
 
