@@ -14,9 +14,30 @@
 #include <ESP8266mDNS.h>
 #include <PubSubClient.h>
 #include <Ticker.h>
-#include <SoftwareSerial.h>  // Aggiunta della libreria SoftwareSerial
+#include <SoftwareSerial.h>
 
-//#define LED_BUILTIN D4 // LED integrato su D1 Mini
+#define DEBUG  // Commenta questa linea per disabilitare il debug seriale
+
+#ifdef DEBUG
+  #define DBG_BEGIN(baud) Serial.begin(baud)
+  #define DBG_PRINT(x) Serial.print(x)
+  #define DBG_PRINTLN(x) Serial.println(x)
+  #define DBG_FUNC_ENTER() do { Serial.print(F("[DEBUG] Enter ")); Serial.println(__FUNCTION__); } while(0)
+#else
+  #define DBG_BEGIN(baud)
+  #define DBG_PRINT(x)
+  #define DBG_PRINTLN(x)
+#endif
+
+#ifdef DEBUG
+// Pin SoftwareSerial per comunicazione con MowerArduino
+#define RX_PIN D2  // Pin RX
+#define TX_PIN D3  // Pin TX
+SoftwareSerial mowerSerial(RX_PIN, TX_PIN);  // Comunicazione con MowerArduino tramite SoftwareSerial
+#else
+// In modalità release usa la seriale hardware
+#define mowerSerial Serial
+#endif
 
 // Dichiarazioni delle funzioni
 void connectToWiFi();
@@ -45,15 +66,15 @@ void publishMqttState();
 void mqttPublish(const char* topic, const char* payload, bool retain = false);
 
 // Configurazione WiFi
-const char* ssid = "IoT";
-const char* password = "zYrfvyFosg";
+const char* ssid = "xxx";
+const char* password = "xxx";
 const char* host = "mowerbridge";  // Nome host mDNS
 
 // Configurazione MQTT
-const char* mqtt_server = "192.168.100.20";  // O l'IP del tuo server MQTT
+const char* mqtt_server = "xxx";  // IP del tuo server MQTT
 const int mqtt_port = 1883;
-const char* mqtt_user = "NodeRed";      // Sostituisci con le tue credenziali
-const char* mqtt_password = "NodeRed";
+const char* mqtt_user = "xxx";      // Sostituisci con le tue credenziali
+const char* mqtt_password = "xxx";
 const char* mqtt_client_id = "d1mini_mower";
 const char* mqtt_base_topic = "home/mower";
 
@@ -71,11 +92,6 @@ ESP8266WebServer server(80);
 // Configurazione seriale per comunicazione con MowerArduino
 #define SERIAL_BAUDRATE 115200
 #define SERIAL_TIMEOUT 1000
-#define RX_PIN D2  // Pin RX per SoftwareSerial
-#define TX_PIN D3  // Pin TX per SoftwareSerial
-
-// Inizializza SoftwareSerial
-SoftwareSerial mowerSerial(RX_PIN, TX_PIN);  // RX, TX
 
 // Buffer per il parsing JSON
 StaticJsonDocument<1024> jsonDoc;
@@ -122,15 +138,17 @@ String mowerStateToString(int stateCode) {
 }
 
 void setup() {
+  DBG_FUNC_ENTER();
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH); // LED spento all'avvio
-  // Inizializza la seriale per il debug
-  Serial.begin(115200);
-  
+  // Inizializza la seriale di debug se abilitato
+  #ifdef DEBUG
+    DBG_BEGIN(115200);
+    DBG_PRINTLN("[DEBUG] Avvio D1MiniSerial");
+  #endif
   // Inizializza SoftwareSerial
   mowerSerial.begin(SERIAL_BAUDRATE);
   mowerSerial.setTimeout(SERIAL_TIMEOUT);
-  Serial.println("SoftwareSerial avviato su RX:" + String(RX_PIN) + " TX:" + String(TX_PIN));
 
   // Connessione al WiFi
   connectToWiFi();
@@ -140,20 +158,10 @@ void setup() {
 
   // Avvia il server
   server.begin();
-  Serial.println("Server HTTP avviato");
 
-  // Avvia mDNS
-  if (MDNS.begin(host)) {
-    Serial.println("mDNS responder avviato");
-    Serial.print("Puoi aprire http://");
-    Serial.print(host);
-    Serial.println(".local nel tuo browser");
-  }
-  
   // Configura MQTT
   setupMqtt();
 
-  Serial.println("Pronto!");
 }
 
 void loop() {
@@ -187,21 +195,17 @@ void loop() {
 
 // Connessione alla rete WiFi
 void connectToWiFi() {
-  Serial.print("Connessione a ");
-  Serial.println(ssid);
 
   WiFi.mode(WIFI_STA);
+  DBG_PRINTLN("[DEBUG] Connecting to WiFi...");
   WiFi.begin(ssid, password);
+  DBG_PRINTLN(String("[DEBUG] SSID: ") + ssid);
 
   while (WiFi.status() != WL_CONNECTED) {
+    DBG_PRINT(".");
     delay(500);
-    Serial.print(".");
-  }
+      }
 
-  Serial.println("");
-  Serial.println("WiFi connesso");
-  Serial.print("Indirizzo IP: ");
-  Serial.println(WiFi.localIP());
 }
 
 // Configurazione del server web
@@ -306,6 +310,26 @@ void handleRoot() {
         </div>
     </div>
 
+    <!-- Telemetria -->
+    <div class="container mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Telemetria</span>
+                <div>
+                    <button id="btnEnableTelemetry" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-play"></i> Abilita
+                    </button>
+                    <button id="btnDisableTelemetry" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-stop"></i> Disabilita
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <pre id="telemetryData" style="min-height:100px;max-height:200px;overflow-y:auto;">Telemetria disattivata.</pre>
+            </div>
+        </div>
+    </div>
+
     <script>
     //<![CDATA[
     // Inizializzazione variabili
@@ -354,6 +378,15 @@ void handleRoot() {
     document.getElementById('btnBackward').addEventListener('click', function() { fetch('/api/backward'); });
     document.getElementById('btnLeft').addEventListener('click', function() { fetch('/api/left'); });
     document.getElementById('btnRight').addEventListener('click', function() { fetch('/api/right'); });
+    // Telemetria
+    document.getElementById('btnEnableTelemetry').addEventListener('click', function() { 
+        fetch('/api/enableTelemetry');
+        document.getElementById('telemetryData').textContent = 'Telemetria abilitata. In attesa di dati...';
+    });
+    document.getElementById('btnDisableTelemetry').addEventListener('click', function() { 
+        fetch('/api/disableTelemetry');
+        document.getElementById('telemetryData').textContent = 'Telemetria disattivata.';
+    });
 
     // Inizializzazione
     var map, marker;
@@ -390,6 +423,7 @@ void handleNotFound() {
 }
 
 void setupWebServer() {
+  DBG_FUNC_ENTER();
   // Pagina principale
   server.on("/", HTTP_GET, handleRoot);
   
@@ -409,7 +443,6 @@ void setupWebServer() {
   server.on("/api/disableTelemetry", HTTP_GET, handleDisableTelemetry);
 
   server.begin();
-  Serial.println("Server HTTP avviato");
 }
 
 // Gestione richieste API
@@ -435,6 +468,7 @@ void handleGetStatus() {
 }
 
 void handleStart() {
+    DBG_PRINTLN("[DEBUG] handleStart()");
     sendCommandToMower("START");
     mowerStatus.isRunning = true;
     mowerStatus.currentState = "Avviato";
@@ -443,10 +477,10 @@ void handleStart() {
     String json = "{\"status\":\"ok\",\"message\":\"Avvio richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
   
-    Serial.println("Richiesto avvio tagliaerba");
 }
 
 void handleStop() {
+    DBG_PRINTLN("[DEBUG] handleStop()");
     sendCommandToMower("STOP");
     mowerStatus.isRunning = false;
     mowerStatus.currentState = "Fermo";
@@ -455,10 +489,10 @@ void handleStop() {
     String json = "{\"status\":\"ok\",\"message\":\"Arresto richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
   
-    Serial.println("Richiesto arresto tagliaerba");
 }
 
 void handleDock() {
+    DBG_PRINTLN("[DEBUG] handleDock()");
     sendCommandToMower("DOCK");
     mowerStatus.isRunning = false;
     mowerStatus.isCharging = true;
@@ -468,47 +502,47 @@ void handleDock() {
     String json = "{\"status\":\"ok\",\"message\":\"Ritorno alla base richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
   
-    Serial.println("Richiesto ritorno alla base");
 }
 
 // Handler per i comandi di direzione
 void handleForward() {
+    DBG_PRINTLN("[DEBUG] handleForward()");
     sendCommandToMower("FORWARD");
     mowerStatus.currentState = "Avanti";
     mowerStatus.lastUpdate = millis();
     String json = "{\"status\":\"ok\",\"message\":\"Avanti richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
-    Serial.println("Richiesto movimento avanti");
 }
 
 void handleBackward() {
+    DBG_PRINTLN("[DEBUG] handleBackward()");
     sendCommandToMower("BACKWARD");
     mowerStatus.currentState = "Indietro";
     mowerStatus.lastUpdate = millis();
     String json = "{\"status\":\"ok\",\"message\":\"Indietro richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
-    Serial.println("Richiesto movimento indietro");
 }
 
 void handleLeft() {
+    DBG_PRINTLN("[DEBUG] handleLeft()");
     sendCommandToMower("LEFT");
     mowerStatus.currentState = "Sinistra";
     mowerStatus.lastUpdate = millis();
     String json = "{\"status\":\"ok\",\"message\":\"Sinistra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
-    Serial.println("Richiesto movimento sinistra");
 }
 
 void handleRight() {
+    DBG_PRINTLN("[DEBUG] handleRight()");
     sendCommandToMower("RIGHT");
     mowerStatus.currentState = "Destra";
     mowerStatus.lastUpdate = millis();
     String json = "{\"status\":\"ok\",\"message\":\"Destra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
     server.send(200, "application/json", json);
-    Serial.println("Richiesto movimento destra");
 }
 
 void handleEnableTelemetry() {
+  DBG_PRINTLN("[DEBUG] handleEnableTelemetry()");
   String intervalStr = server.arg("interval");
   uint32_t interval = intervalStr.length() ? intervalStr.toInt() : 1000;
 
@@ -526,6 +560,7 @@ void handleEnableTelemetry() {
 }
 
 void handleDisableTelemetry() {
+  DBG_PRINTLN("[DEBUG] handleDisableTelemetry()");
   jsonDoc.clear();
   jsonDoc["cmd"] = "disableTelemetry";
   jsonDoc["timestamp"] = millis();
@@ -549,7 +584,6 @@ void sendCommandToMower(const String& command) {
   serializeJson(jsonDoc, jsonString);
   mowerSerial.println(jsonString);
   digitalWrite(LED_BUILTIN, HIGH);  // LED spento
-  Serial.println("Comando inviato: " + command);
   
   // Pubblica il comando su MQTT
   if (mqttClient.connected()) {
@@ -568,8 +602,7 @@ void setupMqtt() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Messaggio ricevuto su topic: ");
-  Serial.println(topic);
+  DBG_PRINTLN("[DEBUG] MQTT message received");
   
   // Converti il payload in una stringa
   char message[length + 1];
@@ -599,14 +632,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void mqttReconnect() {
+  DBG_FUNC_ENTER();
   if (mqttClient.connected()) {
     return;
   }
   
-  Serial.print("Connessione a MQTT...");
   
   if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
-    Serial.println("connesso");
     
     // Iscriviti ai topic di comando
     String commandTopic = String(mqtt_base_topic) + "/set";
@@ -618,9 +650,6 @@ void mqttReconnect() {
     // Pubblica lo stato iniziale
     publishMqttState();
   } else {
-    Serial.print("fallito, rc=");
-    Serial.print(mqttClient.state());
-    Serial.println(" riprovo tra 5 secondi");
   }
 }
 
@@ -673,6 +702,7 @@ void publishMqttDiscovery() {
 }
 
 void publishMqttState() {
+  DBG_FUNC_ENTER();
   if (!mqttClient.connected()) return;
   
   DynamicJsonDocument doc(512);
@@ -690,6 +720,8 @@ void publishMqttState() {
 }
 
 void mqttPublish(const char* topic, const char* payload, bool retain) {
+  DBG_PRINTLN(String("[DEBUG] mqttPublish topic=") + topic);
+  DBG_PRINTLN(String("[DEBUG] payload=") + payload);
   if (mqttClient.connected()) {
     mqttClient.publish(topic, payload, retain);
   }
@@ -700,6 +732,7 @@ void readFromMower() {
   while (mowerSerial.available()) {
     digitalWrite(LED_BUILTIN, LOW);   // LED acceso (RX)
     String line = mowerSerial.readStringUntil('\n');
+    DBG_PRINTLN(String("[DEBUG] RX: ") + line);
     delay(10); // breve lampeggio visibile
     digitalWrite(LED_BUILTIN, HIGH);  // LED spento
     if (line.length() == 0) continue;
