@@ -88,6 +88,21 @@ struct MowerStatus {
   unsigned long lastUpdate = 0;
 } mowerStatus;
 
+// ====== MAPPATURA COMANDI VECCHI -> NUOVI ======
+String translateCommand(const String& legacyCmd) {
+  String cmd = legacyCmd;
+  cmd.toUpperCase();
+  if (cmd == "START") return "startMowing";
+  if (cmd == "STOP") return "stopMowing";
+  if (cmd == "DOCK") return "returnToBase";
+  if (cmd == "FORWARD") return "moveForward";
+  if (cmd == "BACKWARD") return "moveBackward";
+  if (cmd == "LEFT") return "turnLeft";
+  if (cmd == "RIGHT") return "turnRight";
+  // default: pass through unchanged
+  return legacyCmd;
+}
+
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH); // LED spento all'avvio
@@ -476,7 +491,7 @@ void sendCommandToMower(const String& command) {
   digitalWrite(LED_BUILTIN, LOW);   // LED acceso (TX)
   delay(10); // breve lampeggio visibile
   jsonDoc.clear();
-  jsonDoc["cmd"] = command;
+  jsonDoc["cmd"] = translateCommand(command);
   jsonDoc["timestamp"] = millis();
 
   String jsonString;
