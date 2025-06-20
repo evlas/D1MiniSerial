@@ -73,7 +73,6 @@ L'interfaccia web include:
 - **Aggiornamento in tempo reale** dei dati
 
 ## 📸 Mock-up interfaccia
-![Anteprima pagina web](assets/mock.png)
 
 [Apri il mock-up interattivo](assets/mock.html)
 > L’immagine `assets/mock.png` è un semplice mock-up o screenshot dell’interfaccia web. Inserisci il file (ad esempio uno screenshot reale o un mock-up creato con Figma/Draw.io) nella cartella `assets/` per visualizzarlo su GitHub.
