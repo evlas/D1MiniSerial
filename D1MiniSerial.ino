@@ -693,6 +693,25 @@ void publishMqttDiscovery() {
                        "\"device\":" + deviceConfig + "}";
   mqttPublish(voltageTopic.c_str(), voltageConfig.c_str(), true);
   
+  // Pubblica la configurazione per il binary sensor RUNNING
+  String runTopic = String("homeassistant/binary_sensor/") + mqtt_client_id + "_running/config";
+  String runConfig = String("{\"name\":\"Tagliaerba In Funzione\",") +
+                     "\"state_topic\":\"" + String(mqtt_base_topic) + "/state\"," +
+                     "\"value_template\":\"{{ value_json.is_running }}\"," +
+                     "\"payload_on\":\"true\",\"payload_off\":\"false\"," +
+                     "\"device_class\":\"running\"," +
+                     "\"device\":" + deviceConfig + "}";
+  mqttPublish(runTopic.c_str(), runConfig.c_str(), true);
+  // Pubblica la configurazione per il binary sensor CHARGING
+  String chargeTopic = String("homeassistant/binary_sensor/") + mqtt_client_id + "_charging/config";
+  String chargeConfig = String("{\"name\":\"Tagliaerba In Carica\",") +
+                       "\"state_topic\":\"" + String(mqtt_base_topic) + "/state\"," +
+                       "\"value_template\":\"{{ value_json.is_charging }}\"," +
+                       "\"payload_on\":\"true\",\"payload_off\":\"false\"," +
+                       "\"device_class\":\"battery_charging\"," +
+                       "\"device\":" + deviceConfig + "}";
+  mqttPublish(chargeTopic.c_str(), chargeConfig.c_str(), true);
+
   // Pubblica la configurazione per il sensore di stato
   String stateTopic = String("homeassistant/sensor/") + mqtt_client_id + "_state/config";
   String stateConfig = "{\"name\":\"Tagliaerba Stato\","
@@ -708,6 +727,8 @@ void publishMqttState() {
   
   DynamicJsonDocument doc(512);
   doc["state"] = mowerStatus.isRunning ? "RUNNING" : "STOPPED";
+  doc["is_running"] = mowerStatus.isRunning;
+  doc["is_charging"] = mowerStatus.isCharging;
   doc["battery_voltage"] = mowerStatus.batteryVoltage;
   doc["battery_percentage"] = mowerStatus.batteryPercentage;
   doc["status"] = mowerStatus.currentState;
@@ -742,7 +763,7 @@ void readFromMower() {
 
     // --- Nuovo formato JSON dal progetto MowerArduino ---
     if (line.startsWith("{")) {
-      StaticJsonDocument<512> doc;
+      StaticJsonDocument<2048> doc;
       DeserializationError err = deserializeJson(doc, line);
       if (!err) {
         // isMowing / isCharging
