@@ -67,15 +67,15 @@ void publishMqttState();
 void mqttPublish(const char* topic, const char* payload, bool retain = false);
 
 // Configurazione WiFi
-const char* ssid = "xxx";
-const char* password = "xxx";
+const char* ssid = "***REMOVED***";
+const char* password = "***REMOVED***";
 const char* host = "mowerbridge";  // Nome host mDNS
 
 // Configurazione MQTT
-const char* mqtt_server = "xxx";  // IP del tuo server MQTT
+const char* mqtt_server = "***REMOVED***";  // IP del tuo server MQTT
 const int mqtt_port = 1883;
-const char* mqtt_user = "xxx";      // Sostituisci con le tue credenziali
-const char* mqtt_password = "xxx";
+const char* mqtt_user = "***REMOVED***";      // Sostituisci con le tue credenziali
+const char* mqtt_password = "***REMOVED***";
 const char* mqtt_client_id = "d1mini_mower";
 const char* mqtt_base_topic = "home/mower";
 
@@ -379,18 +379,78 @@ void handleRoot() {
     document.getElementById('btnBackward').addEventListener('click', function() { fetch('/api/backward'); });
     document.getElementById('btnLeft').addEventListener('click', function() { fetch('/api/left'); });
     document.getElementById('btnRight').addEventListener('click', function() { fetch('/api/right'); });
-    // Telemetria
+    
+    // Gestione telemetria
+    var telemetryEnabled = false;
+    var telemetryInterval = null;
+    var telemetryData = [];
+    const MAX_TELEMETRY_ENTRIES = 50;
+    
+    // Funzione per aggiornare i dati di telemetria
+    function updateTelemetry() {
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                // Aggiungi il timestamp
+                const now = new Date();
+                const timestamp = now.toLocaleTimeString();
+                
+                // Aggiungi i dati alla coda
+                telemetryData.unshift(`[${timestamp}] ` + 
+                    `Stato: ${data.currentState}, ` +
+                    `Batteria: ${data.batteryPercentage.toFixed(0)}% (${data.batteryVoltage.toFixed(1)}V)`);
+                
+                // Mantieni solo gli ultimi N elementi
+                if (telemetryData.length > MAX_TELEMETRY_ENTRIES) {
+                    telemetryData.pop();
+                }
+                
+                // Aggiorna la visualizzazione
+                document.getElementById('telemetryData').textContent = telemetryData.join('\n');
+                document.getElementById('telemetryData').scrollTop = 0; // Auto-scroll in alto
+            })
+            .catch(error => {
+                console.error('Errore durante l\'aggiornamento della telemetria:', error);
+            });
+    }
+    
+    // Gestione pulsanti telemetria
     document.getElementById('btnEnableTelemetry').addEventListener('click', function() { 
-        fetch('/api/enableTelemetry');
-        document.getElementById('telemetryData').textContent = 'Telemetria abilitata. In attesa di dati...';
+        fetch('/api/enableTelemetry?interval=1000')
+            .then(() => {
+                telemetryEnabled = true;
+                document.getElementById('telemetryData').textContent = 'Telemetria abilitata. In attesa di dati...';
+                telemetryData = []; // Reset dei dati
+                
+                // Avvia l'aggiornamento periodico
+                if (telemetryInterval) clearInterval(telemetryInterval);
+                telemetryInterval = setInterval(updateTelemetry, 1000); // Aggiorna ogni secondo
+                
+                // Primo aggiornamento immediato
+                updateTelemetry();
+            });
     });
+    
     document.getElementById('btnDisableTelemetry').addEventListener('click', function() { 
-        fetch('/api/disableTelemetry');
-        document.getElementById('telemetryData').textContent = 'Telemetria disattivata.';
+        fetch('/api/disableTelemetry')
+            .then(() => {
+                telemetryEnabled = false;
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                document.getElementById('telemetryData').textContent = 'Telemetria disattivata.';
+            });
     });
+    
+    // Avvia l'aggiornamento automatico dello stato
+    setInterval(updateData, 2000); // Aggiorna lo stato ogni 2 secondi
 
     // Inizializzazione
     var map, marker;
+    
+    // Avvia l'aggiornamento iniziale
+    updateData();
     function initMap() {
         map = L.map('map').setView([41.9028, 12.4964], 13); // Roma
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -418,13 +478,91 @@ void handleRoot() {
     server.send(200, "text/html", html);
 }
 
+// Invia una risposta con gli header CORS
+void sendCORS(int code, const String& contentType, const String& content) {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Max-Age", "10000");
+  server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  server.send(code, contentType, content);
+}
+
+// Gestione richieste preflight CORS
+void handleOptions() {
+  sendCORS(200, "text/plain", "");
+}
+
 // Gestione 404
 void handleNotFound() {
-  server.send(404, "text/plain", "Not found");
+  sendCORS(404, "text/plain", "Not found");
+}
+
+// Gestisce i comandi in formato JSON per compatibilità con MowerApp
+void handleCommand() {
+  DBG_PRINTLN("[DEBUG] handleCommand()");
+  
+  if (server.method() == HTTP_OPTIONS) {
+    handleOptions();
+    return;
+  }
+  
+  if (server.method() != HTTP_POST) {
+    sendCORS(405, "application/json", "{\"error\":\"Method not allowed\"}");
+    return;
+  }
+  
+  String body = server.arg("plain");
+  DBG_PRINTLN("[DEBUG] Ricevuto comando: " + body);
+  
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, body);
+  
+  if (error) {
+    sendCORS(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  const char* command = doc["command"];
+  JsonObject params = doc["params"];
+  
+  if (strcmp(command, "getStatus") == 0) {
+    handleGetStatus();
+  } else if (strcmp(command, "start") == 0) {
+    handleStart();
+  } else if (strcmp(command, "stop") == 0) {
+    handleStop();
+  } else if (strcmp(command, "dock") == 0) {
+    handleDock();
+  } else if (strcmp(command, "move_forward") == 0) {
+    handleForward();
+  } else if (strcmp(command, "move_backward") == 0) {
+    handleBackward();
+  } else if (strcmp(command, "turn_left") == 0) {
+    handleLeft();
+  } else if (strcmp(command, "turn_right") == 0) {
+    handleRight();
+  } else {
+    sendCORS(400, "application/json", "{\"error\":\"Comando non supportato\"}");
+  }
 }
 
 void setupWebServer() {
   DBG_FUNC_ENTER();
+  
+  // Gestione richieste OPTIONS (CORS preflight)
+  server.on("/", HTTP_OPTIONS, handleOptions);
+  server.on("/api/status", HTTP_OPTIONS, handleOptions);
+  server.on("/api/start", HTTP_OPTIONS, handleOptions);
+  server.on("/api/stop", HTTP_OPTIONS, handleOptions);
+  server.on("/api/dock", HTTP_OPTIONS, handleOptions);
+  server.on("/api/forward", HTTP_OPTIONS, handleOptions);
+  server.on("/api/backward", HTTP_OPTIONS, handleOptions);
+  server.on("/api/left", HTTP_OPTIONS, handleOptions);
+  server.on("/api/right", HTTP_OPTIONS, handleOptions);
+  server.on("/api/enableTelemetry", HTTP_OPTIONS, handleOptions);
+  server.on("/api/disableTelemetry", HTTP_OPTIONS, handleOptions);
+  server.on("/command", HTTP_OPTIONS, handleOptions);
+  
   // Pagina principale
   server.on("/", HTTP_GET, handleRoot);
   
@@ -442,108 +580,88 @@ void setupWebServer() {
   server.on("/api/right", HTTP_GET, handleRight);
   server.on("/api/enableTelemetry", HTTP_GET, handleEnableTelemetry);
   server.on("/api/disableTelemetry", HTTP_GET, handleDisableTelemetry);
+  
+  // Endpoint per compatibilità con MowerApp
+  server.on("/command", HTTP_POST, handleCommand);
+
+  // Gestione richieste OPTIONS (CORS preflight)
+  server.on("/", HTTP_OPTIONS, handleOptions);
+  server.on("/api/status", HTTP_OPTIONS, handleOptions);
+  server.on("/api/start", HTTP_OPTIONS, handleOptions);
+  server.on("/api/stop", HTTP_OPTIONS, handleOptions);
+  server.on("/api/dock", HTTP_OPTIONS, handleOptions);
+  server.on("/api/forward", HTTP_OPTIONS, handleOptions);
+  server.on("/api/backward", HTTP_OPTIONS, handleOptions);
+  server.on("/api/left", HTTP_OPTIONS, handleOptions);
+  server.on("/api/right", HTTP_OPTIONS, handleOptions);
+  server.on("/api/enableTelemetry", HTTP_OPTIONS, handleOptions);
+  server.on("/api/disableTelemetry", HTTP_OPTIONS, handleOptions);
+  server.on("/command", HTTP_OPTIONS, handleOptions);
+
+  // Endpoint per compatibilità con MowerApp
+  server.on("/command", HTTP_POST, handleCommand);
 
   server.begin();
 }
 
 // Gestione richieste API
 void handleGetStatus() {
-  String json = "{\"isRunning\":" + String(mowerStatus.isRunning ? "true" : "false") +
-                ",\"isCharging\":" + String(mowerStatus.isCharging ? "true" : "false") +
-                ",\"batteryVoltage\":" + String(mowerStatus.batteryVoltage, 2) +
-                ",\"batteryPercentage\":" + String(mowerStatus.batteryPercentage, 1) +
-                ",\"currentState\":\"" + mowerStatus.currentState + "\"";
-  
-  // Aggiungi timestamp
-  unsigned long currentTime = millis();
-  json += ",\"timestamp\":" + String(currentTime) + 
-           ",\"uptime\":" + String(currentTime / 1000) + 
-           ",\"rssi\":" + String(WiFi.RSSI()) + 
-           ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
-  
+  DBG_FUNC_ENTER();
+  String json = "{\"status\":\"ok\",\"isRunning\":";
+  json += mowerStatus.isRunning ? "true" : "false";
+  json += ",\"isCharging\":" + String(mowerStatus.isCharging ? "true" : "false");
+  json += ",\"currentState\":\"" + mowerStatus.currentState + "\"";
+  json += ",\"batteryVoltage\":" + String(mowerStatus.batteryVoltage);
+  json += ",\"batteryPercentage\":" + String(mowerStatus.batteryPercentage);
   json += "}";
-  
-  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send(200, "application/json", json);
+  sendCORS(200, "application/json", json);
 }
 
 void handleStart() {
-    DBG_PRINTLN("[DEBUG] handleStart()");
-    sendCommandToMower("START");
-    mowerStatus.isRunning = true;
-    mowerStatus.currentState = "Avviato";
-    mowerStatus.lastUpdate = millis();
-  
-    String json = "{\"status\":\"ok\",\"message\":\"Avvio richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
-  
+  DBG_FUNC_ENTER();
+  sendCommandToMower("start");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Avvio richiesto\"}");
 }
 
 void handleStop() {
-    DBG_PRINTLN("[DEBUG] handleStop()");
-    sendCommandToMower("STOP");
-    mowerStatus.isRunning = false;
-    mowerStatus.currentState = "Fermo";
-    mowerStatus.lastUpdate = millis();
-  
-    String json = "{\"status\":\"ok\",\"message\":\"Arresto richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
-  
+  DBG_FUNC_ENTER();
+  sendCommandToMower("stop");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Arresto richiesto\"}");
 }
 
 void handleDock() {
-    DBG_PRINTLN("[DEBUG] handleDock()");
-    sendCommandToMower("DOCK");
-    mowerStatus.isRunning = false;
-    mowerStatus.isCharging = true;
-    mowerStatus.currentState = "Ritorno alla base";
-    mowerStatus.lastUpdate = millis();
-  
-    String json = "{\"status\":\"ok\",\"message\":\"Ritorno alla base richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
-  
+  DBG_FUNC_ENTER();
+  sendCommandToMower("dock");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Ritorno alla base richiesto\"}");
 }
 
 // Handler per i comandi di direzione
 void handleForward() {
-    DBG_PRINTLN("[DEBUG] handleForward()");
-    sendCommandToMower("FORWARD");
-    mowerStatus.currentState = "Avanti";
-    mowerStatus.lastUpdate = millis();
-    String json = "{\"status\":\"ok\",\"message\":\"Avanti richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
+  DBG_FUNC_ENTER();
+  sendCommandToMower("forward");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Avanti richiesto\"}");
 }
 
 void handleBackward() {
-    DBG_PRINTLN("[DEBUG] handleBackward()");
-    sendCommandToMower("BACKWARD");
-    mowerStatus.currentState = "Indietro";
-    mowerStatus.lastUpdate = millis();
-    String json = "{\"status\":\"ok\",\"message\":\"Indietro richiesto\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
+  DBG_FUNC_ENTER();
+  sendCommandToMower("backward");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Indietro richiesto\"}");
 }
 
 void handleLeft() {
-    DBG_PRINTLN("[DEBUG] handleLeft()");
-    sendCommandToMower("LEFT");
-    mowerStatus.currentState = "Sinistra";
-    mowerStatus.lastUpdate = millis();
-    String json = "{\"status\":\"ok\",\"message\":\"Sinistra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
+  DBG_FUNC_ENTER();
+  sendCommandToMower("left");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Sinistra richiesta\"}");
 }
 
 void handleRight() {
-    DBG_PRINTLN("[DEBUG] handleRight()");
-    sendCommandToMower("RIGHT");
-    mowerStatus.currentState = "Destra";
-    mowerStatus.lastUpdate = millis();
-    String json = "{\"status\":\"ok\",\"message\":\"Destra richiesta\",\"state\":\"" + mowerStatus.currentState + "\"}";
-    server.send(200, "application/json", json);
+  DBG_FUNC_ENTER();
+  sendCommandToMower("right");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Destra richiesta\"}");
 }
 
 void handleEnableTelemetry() {
-  DBG_PRINTLN("[DEBUG] handleEnableTelemetry()");
+  DBG_FUNC_ENTER();
   String intervalStr = server.arg("interval");
   uint32_t interval = intervalStr.length() ? intervalStr.toInt() : 1000;
 
@@ -557,11 +675,11 @@ void handleEnableTelemetry() {
   serializeJson(jsonDoc, jsonStr);
   mowerSerial.println(jsonStr);
 
-  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry enabled\"}");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry enabled\"}");
 }
 
 void handleDisableTelemetry() {
-  DBG_PRINTLN("[DEBUG] handleDisableTelemetry()");
+  DBG_FUNC_ENTER();
   jsonDoc.clear();
   jsonDoc["cmd"] = "disableTelemetry";
   jsonDoc["timestamp"] = millis();
@@ -570,7 +688,7 @@ void handleDisableTelemetry() {
   serializeJson(jsonDoc, jsonStr);
   mowerSerial.println(jsonStr);
 
-  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry disabled\"}");
+  sendCORS(200, "application/json", "{\"status\":\"ok\",\"message\":\"Telemetry disabled\"}");
 }
 
 // Invia un comando al tagliaerba
