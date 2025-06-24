@@ -67,15 +67,15 @@ void publishMqttState();
 void mqttPublish(const char* topic, const char* payload, bool retain = false);
 
 // Configurazione WiFi
-const char* ssid = "IoT";
-const char* password = "zYrfvyFosg";
+const char* ssid = "xxx";
+const char* password = "xxx";
 const char* host = "mowerbridge";  // Nome host mDNS
 
 // Configurazione MQTT
-const char* mqtt_server = "192.168.100.20";  // IP del tuo server MQTT
+const char* mqtt_server = "xxx";  // IP del tuo server MQTT
 const int mqtt_port = 1883;
-const char* mqtt_user = "NodeRed";      // Sostituisci con le tue credenziali
-const char* mqtt_password = "NodeRed";
+const char* mqtt_user = "xxx";      // Sostituisci con le tue credenziali
+const char* mqtt_password = "xxx";
 const char* mqtt_client_id = "d1mini_mower";
 const char* mqtt_base_topic = "home/mower";
 
