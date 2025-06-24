@@ -38,10 +38,10 @@ D1MiniSerial è un bridge WiFi basato su ESP8266 (D1 Mini) che permette il contr
 ## 🚀 Installazione
 
 1. **Clona il repository**
-   ***REMOVED***bash
+   ```bash
    git clone https://github.com/tuoutente/D1MiniSerial.git
    cd D1MiniSerial
-   ***REMOVED***
+   ```
 
 2. **Apri il progetto** con Arduino IDE o PlatformIO
 
@@ -51,13 +51,13 @@ D1MiniSerial è un bridge WiFi basato su ESP8266 (D1 Mini) che permette il contr
    - ArduinoJson
 
 4. **Configura** le impostazioni nel file `D1MiniSerial.ino`:
-   ***REMOVED***cpp
+   ```cpp
    const char* ssid = "NOME_RETE_WIFI";
    const char* password = "PASSWORD_WIFI";
    // Configurazione MQTT (opzionale)
    const char* mqtt_server = "homeassistant.local";
    const int mqtt_port = 1883;
-   ***REMOVED***
+   ```
 
 5. **Carica** lo sketch sul tuo D1 Mini
 
@@ -89,9 +89,9 @@ Il supporto MQTT permette l'integrazione con Home Assistant. Le entità vengono 
 
 Il modulo comunica con il tagliaerba tramite una porta seriale utilizzando un semplice protocollo basato su stringhe:
 
-***REMOVED***
+```
 STATUS:RUNNING,BATT:24.5,PERCENT:75
-***REMOVED***
+```
 
 ## 🤝 Contributi
 
